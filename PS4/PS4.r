@@ -4,6 +4,8 @@
 
 library(AmesHousing)
 library(dplyr)
+library(collections)
+library(glmnet)
 
 ## Problem 1
 df <- make_ames()
@@ -16,31 +18,63 @@ pred_mat <- pred_mat[sapply(pred_mat, function(x) length(unique(na.omit(x)))) > 
 ## Problem 2
 
 prep_data <- function(data){
+  
+  # Taking random 1000 observations
   test_ind <- sample.int(nrow(pred_mat), 1000)
-  data_test <- pred_mat[test_ind, ]
-  data_train <- pred_mat[-test_ind, ]
+  
+  X <- model.matrix(Sale_Price~., data=data)[, -1]
+  y <- data$Sale_Price
+  
+  # Delete duplicates
+  dups <- which(apply(X, 2, sd) == 0)
+  X <- X[,-dups]
+  
+  # Split into train and test data
+  X_train <- X[-test_ind, ]
+  X_test <- X[test_ind, ]
+  y_train <- y[-test_ind]
+  y_test <- y[test_ind]
+  
+
+  
+  # Making object for output
+  out_dict <- dict()
+  
+  # Saving stuff in dictionary
+  out_dict$set("xtrain", X_train)
+  out_dict$set("xtest", X_test)
+  out_dict$set("ytrain", y_train)
+  out_dict$set("ytest", y_test)
   
   
-  X_train <- model.matrix(Sale_Price~., data=data_train)[, -1]
-  y_train <- data_train$Sale_Price
   
-  X_test <- model.matrix(Sale_Price~., data=data_test)[, -1]
-  y_test <- data_test$Sale_Price
-  
-  # Duplicate columns the same for train and test 
-  dups <- which(apply(data, 2, sd) == 0)
-  X_train <- X_train[, -dups]
-  X_test <- X_test[, -dups]
-  
-  return(list(X_train, X_test, y_train, y_test))
+  return(out_dict)
 }
 
+
+### OLS Model
 data <- prep_data(pred_mat)
+ols_model <- lm(data$get("ytrain")~data$get("xtrain"))
+
+### CV Ridge-Regression
+cv_ridge <- cv.glmnet(data$get("xtrain"), data$get("ytrain"), alpha = 1)
+# plot(cv_ridge)
+best_ridge <- cv_ridge$glmnet.fit # Save best fit
+
+
+### CV Laso-Regression
+cv_lasso <- cv.glmnet(data$get("xtrain"), data$get("ytrain"), alpha = 0)
+# plot(cv_lasso)
+best_lasso <- cv_lasso$glmnet.fit # Save best fit
+
+
+pred_ols <- predict.lm(ols_model, newdata=data.frame(data$get("xtest")))
+pred_ridge <- predict.glmnet(best_ridge, s = cv_ridge$lambda.min, newx=data$get("xtest"))
+pred_lasso <- predict.glmnet(best_lasso, s = cv_lasso$lambda.min, newx=data$get("xtest"))
 
 
 
-
-# OLS estimation
-model <- lm(y~X)
-summary(model)
-predict(model, )
+mse <- function(pred, y){
+  mse <- mean((pred-y)^2)
+  return(mse)
+}
